@@ -1,80 +1,75 @@
 # PathReliability Testkit
 
-**Toy models with known reliability verdicts — try [PathReliability](https://github.com/msicilia/pathreliability)
-without your own model or data.**
+Toy encoders with known behaviour, for trying
+[PathReliability](https://github.com/msicilia/pathreliability) without a model or data of your
+own. Everything is pure numpy: no torch, no GPU, no downloads.
 
-If you want to see what the tool does before wiring up your own encoder, this gives you three
-tiny "encoders" whose reliability behaviour is engineered and predictable, plus a synthetic
-dataset generated on the fly. Everything is pure numpy — **no torch, no GPU, no downloads.**
+The kit has three small encoders whose features are built by hand, and a generator of synthetic
+patches. It is a way to check that the tool is installed and to see what a report looks like. It
+says nothing about real models.
 
 ## Setup
 
-These toy models are adapters for the
-[PathReliability](https://github.com/msicilia/pathreliability) tool, so you need the tool — its
-Docker image, or a source install. Then clone this repo and generate the synthetic data:
+Install the tool (its Docker image, or `pip install` from its repository), then:
 
 ```bash
 git clone https://github.com/msicilia/pathreliability-testkit && cd pathreliability-testkit
-python make_dataset.py               # writes ./sample_data and ./sample_data_ood (needs numpy, pillow)
+python make_dataset.py        # writes ./sample_data and ./sample_data_ood (numpy, pillow)
 ```
 
-## Run the tool on each toy model
+`sample_data` has four "tissue" classes and two non-diagnostic ones (`BACK`, smooth, and `DEB`,
+noisy). `sample_data_ood` is the same design with a shifted palette and plays the second dataset.
 
-With the tool's Docker image, mounting this folder and an output directory:
+## Run the tool on a toy encoder
 
 ```bash
-docker run --rm -v "$PWD:/work" -v "$PWD/out:/out" \
-  pathreliability audit --adapter /work/models.py:Reliable \
-  --data /work/sample_data --ood-data /work/sample_data_ood --out /out
+pathreliability audit --adapter models.py:Reliable --data ./sample_data \
+    --far-data ./sample_data_ood --artefact-classes BACK DEB --out ./out
 ```
 
-Swap `Reliable` for `TextureBlind` or `Useless`. Equivalently, with a source install of the tool
-(`pip install -e ../pathreliability`):
+or, with the Docker image:
 
 ```bash
-pathreliability audit --adapter models.py:Useless --data ./sample_data --ood-data ./sample_data_ood
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+  ghcr.io/msicilia/pathreliability audit --adapter /work/models.py:Reliable \
+  --data /work/sample_data --far-data /work/sample_data_ood \
+  --artefact-classes BACK DEB --out /work/out
 ```
 
-Open each `out/report.html`. To run all three and print a summary table (this requires the source
-install, as it imports the tool):
+Open `out/report.html`, and replace `Reliable` with `TextureBlind` or `Useless` to compare. To
+run all three and print their main values (this needs a source or pip install of the tool):
 
 ```bash
 python verify.py
 ```
 
-## The three models and their expected verdicts
+## The three encoders and what to expect
 
-Each model returns hand-built features, so its behaviour is deterministic and explainable.
+| Encoder | Features | Accuracy | Second dataset | Non-diagnostic classes | Blur, σ = 1 / 2 / 3 |
+|---|---|---|---|---|---|
+| `Reliable` | colour, contrast, high-frequency content | 1.00 | 1.00 | 1.00 | 0.93 / 1.00 / 1.00 |
+| `TextureBlind` | colour of a heavily blurred copy | 1.00 | 1.00 | 1.00 | 0.52 / 0.71 / 0.84 |
+| `Useless` | overall brightness only | 0.58 | 1.00 | 0.47 | 0.50 / 0.50 / 0.50 |
 
-| Model | What it "sees" | far-OOD | artefact | blur | accuracy | OOD axis | corruption axis |
-|---|---|---|---|---|---|---|---|
-| **Reliable** | colour + contrast + texture | 0.97 | 1.00 | 0.94→1.0 | 1.00 | **PASS** | **PASS** |
-| **TextureBlind** | colour of a heavily-blurred copy | 0.97 | 1.00 | 0.57→0.84 | 0.83 | PASS | **WARN** (weak at mild blur) |
-| **Useless** | one near-constant number | 0.29 | 0.42 | 0.51 | 0.34 | **FAIL** | WARN |
+The detection columns are AUROCs of the Mahalanobis score, where 0.5 is chance. They are the
+output of `verify.py` with version 0.2.0 of the tool.
 
-- **Reliable** — a healthy encoder: it flags other-tissue inputs, rejects background/debris, and
-  notices blur. Passes every reliability axis.
-- **TextureBlind** — it has thrown away high-frequency detail, so it still classifies (colours
-  differ) but is **weak at detecting blur** — the corruption axis warns.
-- **Useless** — an uninformative encoder: it cannot separate anything, so far-OOD is near chance
-  and artefact rejection fails. **The tool blocks it** (`artifact_rejection_fail`).
+- `Reliable` separates the classes and detects everything it is shown.
+- `TextureBlind` classifies as well, but detects mild blur at chance: it has already discarded
+  the detail that blur removes. Two encoders with the same accuracy differ here, which is the
+  point of auditing beyond accuracy.
+- `Useless` is inaccurate and at chance on blur and on the non-diagnostic classes. It still
+  detects the second dataset, because the shifted palette changes the one thing it reads,
+  brightness.
 
-> **Note on the calibration axis.** On this tiny synthetic dataset the calibration axis is not
-> meaningful (a linear probe on near-perfectly-separable toy data is not well-calibrated), so it
-> may WARN for every model, including the healthy one. Judge the toy models by the **OOD and
-> corruption** axes, which separate them cleanly. On real data the calibration axis is
-> informative — see the method paper's PANDA result.
+The synthetic patches carry no patient or slide ids, so the report notes that the split is at
+patch level and skips the tuning check. Calibration and error ranking are of little interest on
+data this separable.
 
-## Use these on your own data
+## Files
 
-The models are dataset-agnostic — point them at any ImageFolder (one subfolder per class). Name
-some classes `BACK` / `DEB` / `ADI` to activate the artefact-rejection axis. This is a quick way
-to sanity-check that the tool is installed and behaving before you wrap your real model.
+- `make_dataset.py`: generates the two synthetic patch sets
+- `models.py`: the three toy encoders
+- `verify.py`: runs all three and prints their main values
 
-## What's here
-
-- `make_dataset.py` — generates the synthetic ID and far-OOD datasets
-- `models.py` — the three toy encoders (`Reliable`, `TextureBlind`, `Useless`)
-- `verify.py` — runs all three and prints the summary table
-
-MIT-licensed.
+MIT licence.

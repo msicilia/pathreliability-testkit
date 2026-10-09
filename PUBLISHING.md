@@ -1,11 +1,7 @@
-# Publishing the testkit to GitHub
+# Releasing
 
-```bash
-cd pathreliability-testkit
-git init && git add . && git commit -m "PathReliability testkit — toy models with known verdicts"
-gh repo create pathreliability-testkit --public --source=. --push \
-  --description "Toy encoders with known reliability verdicts to exercise PathReliability"
-```
+The repository is https://github.com/msicilia/pathreliability-testkit.
 
-Generated data (`sample_data/`, `sample_data_ood/`) and `out/` are git-ignored — they are
-recreated by `python make_dataset.py`. Link this repo from the main tool's README.
+The synthetic patches (`sample_data/`, `sample_data_ood/`) and `out/` are ignored; they are
+recreated by `python make_dataset.py`. After a release of the tool that changes its values, run
+`python verify.py` and update the table in the README from its output.
